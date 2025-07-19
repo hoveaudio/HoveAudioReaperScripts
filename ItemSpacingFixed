@@ -1,0 +1,51 @@
+-- Item Spacing Script - Fixed 0.1 seconds
+-- Works with 1 or more items selected
+
+local SPACING = 0.1  -- Fixed spacing value
+
+-- Get selected items
+local item_count = reaper.CountSelectedMediaItems(0)
+
+if item_count == 0 then
+    reaper.ShowMessageBox("Select at least 1 item", "Error", 0)
+    return
+end
+
+reaper.Undo_BeginBlock()
+
+if item_count == 1 then
+    -- Single item: move to edit cursor (no spacing)
+    local item = reaper.GetSelectedMediaItem(0, 0)
+    local cursor_pos = reaper.GetCursorPosition()
+    reaper.SetMediaItemPosition(item, cursor_pos, false)
+else
+    -- Multiple items: space them out
+    -- Create table of items with their positions
+    local items = {}
+    for i = 0, item_count - 1 do
+        local item = reaper.GetSelectedMediaItem(0, i)
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        table.insert(items, {item = item, pos = pos})
+    end
+    
+    -- Sort items by position
+    table.sort(items, function(a, b) return a.pos < b.pos end)
+    
+    -- Space items with fixed value
+    for i = 2, #items do
+        local prev_item = items[i-1].item
+        local curr_item = items[i].item
+        
+        -- Get previous item's end position
+        local prev_pos = reaper.GetMediaItemInfo_Value(prev_item, "D_POSITION")
+        local prev_length = reaper.GetMediaItemInfo_Value(prev_item, "D_LENGTH")
+        local prev_end = prev_pos + prev_length
+        
+        -- Set current item position with spacing
+        local new_pos = prev_end + SPACING
+        reaper.SetMediaItemPosition(curr_item, new_pos, false)
+    end
+end
+
+reaper.Undo_EndBlock("Space items 0.1s", -1)
+reaper.UpdateArrange()
