@@ -1,0 +1,94 @@
+-- Item Spacing Script - Auto-selects items from selected tracks
+-- Works after dynamic split without manual selection
+-- With custom spacing value input
+
+-- Small delay to ensure previous actions have completed
+reaper.defer(function() end)  -- Allow one cycle for updates
+reaper.UpdateArrange()  -- Force refresh of arrange view
+
+-- Get custom spacing value from user
+local retval, user_input = reaper.GetUserInputs("Item Spacing", 1, "Spacing (seconds):", "0.1")
+if not retval then
+    return -- User cancelled
+end
+
+local SPACING = tonumber(user_input)
+if not SPACING then
+    reaper.ShowMessageBox("Invalid spacing value. Please enter a number.", "Error", 0)
+    return
+end
+
+-- Force selection of all items on all selected tracks
+local track_count = reaper.CountSelectedTracks(0)
+if track_count == 0 then
+    reaper.ShowMessageBox("Select at least 1 track", "Error", 0)
+    return
+end
+
+-- Clear and rebuild item selection
+reaper.SelectAllMediaItems(0, false)
+for i = 0, track_count - 1 do
+    local track = reaper.GetSelectedTrack(0, i)
+    local item_count_on_track = reaper.CountTrackMediaItems(track)
+    
+    for j = 0, item_count_on_track - 1 do
+        local item = reaper.GetTrackMediaItem(track, j)
+        reaper.SetMediaItemSelected(item, true)
+    end
+end
+
+local item_count = reaper.CountSelectedMediaItems(0)
+if item_count == 0 then
+    reaper.ShowMessageBox("No items found on selected tracks", "Error", 0)
+    return
+end
+if item_count == 0 then
+    reaper.ShowMessageBox("No items found on selected tracks", "Error", 0)
+    return
+end
+
+reaper.Undo_BeginBlock()
+
+if item_count > 1 then
+    -- Multiple items: space them out starting from edit cursor
+    -- Create table of items with their positions
+    local items = {}
+    for i = 0, item_count - 1 do
+        local item = reaper.GetSelectedMediaItem(0, i)
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        table.insert(items, {item = item, pos = pos})
+    end
+    
+    -- Sort items by position
+    table.sort(items, function(a, b) return a.pos < b.pos end)
+    
+    -- Get edit cursor position and move first item there
+    local cursor_pos = reaper.GetCursorPosition()
+    local first_item = items[1].item
+    reaper.SetMediaItemPosition(first_item, cursor_pos, false)
+    
+    -- Space remaining items from the first item
+    for i = 2, #items do
+        local prev_item = items[i-1].item
+        local curr_item = items[i].item
+        
+        -- Get previous item's end position (now based on cursor position)
+        local prev_pos = reaper.GetMediaItemInfo_Value(prev_item, "D_POSITION")
+        local prev_length = reaper.GetMediaItemInfo_Value(prev_item, "D_LENGTH")
+        local prev_end = prev_pos + prev_length
+        
+        -- Set current item position with spacing
+        local new_pos = prev_end + SPACING
+        reaper.SetMediaItemPosition(curr_item, new_pos, false)
+    end
+elseif item_count == 1 then
+    -- Single item: move to edit cursor position
+    local item = reaper.GetSelectedMediaItem(0, 0)
+    local cursor_pos = reaper.GetCursorPosition()
+    reaper.SetMediaItemPosition(item, cursor_pos, false)
+end
+
+-- Create dynamic undo message with spacing value
+local undo_message = string.format("Space items %.3fs", SPACING)
+reaper.Undo_EndBlock(undo_message, -1)
+reaper.UpdateArrange()
