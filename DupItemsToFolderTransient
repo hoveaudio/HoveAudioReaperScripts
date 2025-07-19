@@ -1,0 +1,278 @@
+-- Copy selected items to child tracks of selected parent folder
+-- Each item gets its own track, transients aligned to edit cursor
+-- Script by User - Fixed Version
+
+-- Function to find first transient in item using REAPER's built-in detection
+function find_first_transient(item)
+    -- Check if item is valid
+    if not item or not reaper.ValidatePtr2(0, item, "MediaItem*") then
+        return 0
+    end
+    
+    local take = reaper.GetActiveTake(item)
+    if not take then return 0 end
+    
+    -- Store current edit cursor position
+    local original_cursor = reaper.GetCursorPosition()
+    
+    -- Get item position and length
+    local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local item_length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    
+    -- Store current item selections
+    local original_selections = {}
+    local num_selected = reaper.CountSelectedMediaItems(0)
+    for i = 0, num_selected - 1 do
+        local sel_item = reaper.GetSelectedMediaItem(0, i)
+        table.insert(original_selections, sel_item)
+    end
+    
+    -- Clear all selections and select only this item
+    reaper.SelectAllMediaItems(0, false)
+    reaper.SetMediaItemSelected(item, true)
+    
+    -- Move cursor to item start
+    reaper.SetEditCurPos(item_pos, false, false)
+    
+    -- Use REAPER's "Go to next transient in items" command
+    reaper.Main_OnCommand(40375, 0)  -- Item navigation: Move cursor to next transient in items
+    
+    -- Get the new cursor position (should be at the first transient)
+    local transient_pos = reaper.GetCursorPosition()
+    
+    -- Calculate offset from item start to transient
+    local transient_offset = transient_pos - item_pos
+    
+    -- If the cursor didn't move or moved beyond the item, there's no transient detected
+    if transient_offset <= 0 or transient_offset >= item_length then
+        transient_offset = 0
+    end
+    
+    -- Restore original selections
+    reaper.SelectAllMediaItems(0, false)
+    for _, sel_item in ipairs(original_selections) do
+        reaper.SetMediaItemSelected(sel_item, true)
+    end
+    
+    -- Restore original cursor position
+    reaper.SetEditCurPos(original_cursor, false, false)
+    
+    return transient_offset
+end
+
+function main()
+    -- Check if we have selected items
+    local num_items = reaper.CountSelectedMediaItems(0)
+    if num_items == 0 then
+        reaper.ShowMessageBox("No items selected", "Error", 0)
+        return
+    end
+    
+    -- Find the selected parent folder track
+    local parent_folder = nil
+    local num_tracks = reaper.CountTracks(0)
+    
+    for i = 0, num_tracks - 1 do
+        local track = reaper.GetTrack(0, i)
+        if reaper.IsTrackSelected(track) and reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH") == 1 then
+            parent_folder = track
+            break
+        end
+    end
+    
+    if not parent_folder then
+        reaper.ShowMessageBox("No parent folder track selected", "Error", 0)
+        return
+    end
+    
+    -- Get edit cursor position
+    local edit_cursor = reaper.GetCursorPosition()
+    
+    -- Start undo block
+    reaper.Undo_BeginBlock()
+    
+    -- Store information about each selected item
+    local items_data = {}
+    for i = 0, num_items - 1 do
+        local item = reaper.GetSelectedMediaItem(0, i)
+        
+        -- Validate the item before processing
+        if item and reaper.ValidatePtr2(0, item, "MediaItem*") then
+            local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+            local item_length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+            
+            -- Find the first transient in the audio using REAPER's detection
+            local transient_offset = find_first_transient(item)
+            
+            table.insert(items_data, {
+                item = item,
+                position = item_pos,
+                length = item_length,
+                transient_offset = transient_offset
+            })
+        end
+    end
+    
+    -- Check if we have any valid items
+    if #items_data == 0 then
+        reaper.ShowMessageBox("No valid items found", "Error", 0)
+        reaper.Undo_EndBlock("Copy items to folder child tracks with transient alignment", -1)
+        return
+    end
+    
+    -- Find parent folder track index
+    local parent_idx = reaper.GetMediaTrackInfo_Value(parent_folder, "IP_TRACKNUMBER") - 1
+    
+    -- Find existing child tracks within the folder
+    local child_tracks = {}
+    local track_idx = parent_idx + 1
+    local folder_level = 1
+    
+    while track_idx < num_tracks do
+        local track = reaper.GetTrack(0, track_idx)
+        local folder_depth = reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH")
+        
+        -- Add this track as a child
+        table.insert(child_tracks, track)
+        
+        -- Adjust folder level based on folder depth
+        folder_level = folder_level + folder_depth
+        
+        -- If we've closed the parent folder, break
+        if folder_level <= 0 then
+            break
+        end
+        
+        track_idx = track_idx + 1
+    end
+    
+    -- Create additional tracks if needed
+    local tracks_needed = #items_data
+    local existing_child_count = #child_tracks
+    
+    if existing_child_count < tracks_needed then
+        local tracks_to_create = tracks_needed - existing_child_count
+        
+        -- Find insertion point (before the last child track that closes the folder)
+        local insert_idx = parent_idx + existing_child_count
+        
+        -- Handle folder depth for the last child track
+        local last_child_folder_depth = 0
+        if existing_child_count > 0 then
+            local last_child = child_tracks[#child_tracks]
+            last_child_folder_depth = reaper.GetMediaTrackInfo_Value(last_child, "I_FOLDERDEPTH")
+            -- Reset the last child's folder depth to 0 temporarily
+            reaper.SetMediaTrackInfo_Value(last_child, "I_FOLDERDEPTH", 0)
+        end
+        
+        for i = 1, tracks_to_create do
+            reaper.InsertTrackAtIndex(insert_idx + i, false)
+            local new_track = reaper.GetTrack(0, insert_idx + i)
+            
+            -- Set random color
+            local r = math.random(0, 255)
+            local g = math.random(0, 255)
+            local b = math.random(0, 255)
+            local color = reaper.ColorToNative(r, g, b)
+            reaper.SetTrackColor(new_track, color)
+            
+            -- Set track name
+            reaper.GetSetMediaTrackInfo_String(new_track, "P_NAME", "Item Track " .. (existing_child_count + i), true)
+            
+            table.insert(child_tracks, new_track)
+        end
+        
+        -- Set the new last child track to close the folder
+        local new_last_child = child_tracks[#child_tracks]
+        if existing_child_count > 0 then
+            reaper.SetMediaTrackInfo_Value(new_last_child, "I_FOLDERDEPTH", last_child_folder_depth)
+        else
+            reaper.SetMediaTrackInfo_Value(new_last_child, "I_FOLDERDEPTH", -1)
+        end
+        
+        -- Update track count since we added tracks
+        num_tracks = reaper.CountTracks(0)
+    end
+    
+    -- Duplicate each item to its target track
+    for i = 1, #items_data do
+        local item_info = items_data[i]
+        local target_track = child_tracks[i]
+        local source_item = item_info.item
+        
+        -- Position the new item so the detected transient aligns with the edit cursor
+        local new_pos = edit_cursor - item_info.transient_offset
+        
+        -- Add item to target track
+        local new_item = reaper.AddMediaItemToTrack(target_track)
+        
+        -- Copy all properties from source item
+        reaper.SetMediaItemInfo_Value(new_item, "D_POSITION", new_pos)
+        reaper.SetMediaItemInfo_Value(new_item, "D_LENGTH", item_info.length)
+        reaper.SetMediaItemInfo_Value(new_item, "D_SNAPOFFSET", reaper.GetMediaItemInfo_Value(source_item, "D_SNAPOFFSET"))
+        reaper.SetMediaItemInfo_Value(new_item, "D_FADEINLEN", reaper.GetMediaItemInfo_Value(source_item, "D_FADEINLEN"))
+        reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTLEN", reaper.GetMediaItemInfo_Value(source_item, "D_FADEOUTLEN"))
+        reaper.SetMediaItemInfo_Value(new_item, "D_FADEINDIR", reaper.GetMediaItemInfo_Value(source_item, "D_FADEINDIR"))
+        reaper.SetMediaItemInfo_Value(new_item, "D_FADEOUTDIR", reaper.GetMediaItemInfo_Value(source_item, "D_FADEOUTDIR"))
+        reaper.SetMediaItemInfo_Value(new_item, "D_VOL", reaper.GetMediaItemInfo_Value(source_item, "D_VOL"))
+        reaper.SetMediaItemInfo_Value(new_item, "B_MUTE", reaper.GetMediaItemInfo_Value(source_item, "B_MUTE"))
+        reaper.SetMediaItemInfo_Value(new_item, "B_LOOPSRC", reaper.GetMediaItemInfo_Value(source_item, "B_LOOPSRC"))
+        reaper.SetMediaItemInfo_Value(new_item, "B_ALLTAKESPLAY", reaper.GetMediaItemInfo_Value(source_item, "B_ALLTAKESPLAY"))
+        reaper.SetMediaItemInfo_Value(new_item, "B_UISEL", reaper.GetMediaItemInfo_Value(source_item, "B_UISEL"))
+        reaper.SetMediaItemInfo_Value(new_item, "C_LOCK", reaper.GetMediaItemInfo_Value(source_item, "C_LOCK"))
+        
+        -- Copy takes from source item
+        local num_takes = reaper.CountTakes(source_item)
+        for take_idx = 0, num_takes - 1 do
+            local source_take = reaper.GetTake(source_item, take_idx)
+            if source_take then
+                local source_src = reaper.GetMediaItemTake_Source(source_take)
+                
+                -- Add take to new item
+                local new_take = reaper.AddTakeToMediaItem(new_item)
+                reaper.SetMediaItemTake_Source(new_take, source_src)
+                
+                -- Copy take properties
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_STARTOFFS", reaper.GetMediaItemTakeInfo_Value(source_take, "D_STARTOFFS"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_VOL", reaper.GetMediaItemTakeInfo_Value(source_take, "D_VOL"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_PAN", reaper.GetMediaItemTakeInfo_Value(source_take, "D_PAN"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_PANLAW", reaper.GetMediaItemTakeInfo_Value(source_take, "D_PANLAW"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_PLAYRATE", reaper.GetMediaItemTakeInfo_Value(source_take, "D_PLAYRATE"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "D_PITCH", reaper.GetMediaItemTakeInfo_Value(source_take, "D_PITCH"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "B_PPITCH", reaper.GetMediaItemTakeInfo_Value(source_take, "B_PPITCH"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "I_CHANMODE", reaper.GetMediaItemTakeInfo_Value(source_take, "I_CHANMODE"))
+                reaper.SetMediaItemTakeInfo_Value(new_take, "I_PITCHMODE", reaper.GetMediaItemTakeInfo_Value(source_take, "I_PITCHMODE"))
+                
+                -- Copy take name
+                local retval, take_name = reaper.GetSetMediaItemTakeInfo_String(source_take, "P_NAME", "", false)
+                reaper.GetSetMediaItemTakeInfo_String(new_take, "P_NAME", take_name, true)
+                
+                -- Set as active take if it was active in source
+                if source_take == reaper.GetActiveTake(source_item) then
+                    reaper.SetActiveTake(new_take)
+                end
+            end
+        end
+        
+        -- Update the item after adding all takes
+        reaper.UpdateItemInProject(new_item)
+    end
+    
+    -- Restore original item selections
+    reaper.SelectAllMediaItems(0, false)
+    for i = 1, #items_data do
+        reaper.SetMediaItemSelected(items_data[i].item, true)
+    end
+    
+    -- Update arrange view
+    reaper.UpdateArrange()
+    
+    -- End undo block
+    reaper.Undo_EndBlock("Copy items to folder child tracks with transient alignment", -1)
+end
+
+-- Initialize random seed
+math.randomseed(os.time())
+
+-- Run the main function
+main()
