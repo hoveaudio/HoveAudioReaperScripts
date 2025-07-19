@@ -1,0 +1,76 @@
+-- Script: Create Folder with 5 Tracks and Plugins
+-- Description: Creates a folder track with plugins and 5 child tracks inside
+-- Author: Generated for Reaper DAW
+
+-- Seed the random number generator for truly random colors
+math.randomseed(os.time())
+
+-- Begin undo block
+reaper.Undo_BeginBlock()
+
+-- Get the current project
+local project = 0
+
+-- Insert folder track at current position
+local folder_track_index = reaper.CountTracks(project)
+reaper.InsertTrackAtIndex(folder_track_index, false)
+local folder_track = reaper.GetTrack(project, folder_track_index)
+
+-- Set folder track properties
+reaper.GetSetMediaTrackInfo_String(folder_track, "P_NAME", "Main Folder", true)
+reaper.SetMediaTrackInfo_Value(folder_track, "I_FOLDERDEPTH", 1) -- Make it a folder
+
+-- Color the folder track with random color
+local r = math.random(50, 255)
+local g = math.random(50, 255) 
+local b = math.random(50, 255)
+reaper.SetTrackColor(folder_track, reaper.ColorToNative(r, g, b)|0x1000000)
+
+-- Add plugins to folder track (examples - modify these to your preferred plugins)
+-- You can replace these with your actual plugin names
+
+-- Example 1: Add EQ plugin
+reaper.TrackFX_AddByName(folder_track, "ReaEQ", false, -1)
+
+-- Example 2: Add Compressor plugin
+reaper.TrackFX_AddByName(folder_track, "ReaComp", false, -1)
+
+-- Example 3: Add Reverb plugin (if available)
+-- reaper.TrackFX_AddByName(folder_track, "ReaVerbate", false, -1)
+
+-- Create 5 child tracks
+for i = 1, 5 do
+    local child_track_index = reaper.CountTracks(project)
+    reaper.InsertTrackAtIndex(child_track_index, false)
+    local child_track = reaper.GetTrack(project, child_track_index)
+    
+    -- Name the child tracks
+    reaper.GetSetMediaTrackInfo_String(child_track, "P_NAME", "Track " .. i, true)
+    
+    -- Set folder depth for child tracks (they are inside the folder)
+    if i == 5 then
+        -- Last track closes the folder
+        reaper.SetMediaTrackInfo_Value(child_track, "I_FOLDERDEPTH", -1)
+    else
+        -- Other tracks are inside the folder
+        reaper.SetMediaTrackInfo_Value(child_track, "I_FOLDERDEPTH", 0)
+    end
+    
+    -- Optional: Color child tracks with random colors
+    local r = math.random(50, 255)
+    local g = math.random(50, 255)
+    local b = math.random(50, 255)
+    reaper.SetTrackColor(child_track, reaper.ColorToNative(r, g, b)|0x1000000)
+    
+    -- Optional: Add a default plugin to each child track
+    -- reaper.TrackFX_AddByName(child_track, "ReaGate", false, -1)
+end
+
+-- Select the folder track
+reaper.SetOnlyTrackSelected(folder_track)
+
+-- Refresh the track list
+reaper.TrackList_AdjustWindows(false)
+
+-- End undo block
+reaper.Undo_EndBlock("Create Folder with 5 Tracks and Plugins", -1)
