@@ -1,0 +1,185 @@
+--[[
+  ReaScript Name: Deselect Folder Child Items
+  Author: Based on BFO/LKC Folder Items Script
+  REAPER: 7.42+
+  Version: 1.0
+  About:
+    Deselects child items while keeping folder items selected.
+    Temporarily disables the main folder script's child selection behavior.
+]]
+
+-- CONSTANTS
+local MAX_TRACKS = 50
+local MAX_ITEMS_PER_TRACK = 1000
+
+-- Utility functions
+local function safeGetTrack(index)
+    if index < 0 or index >= reaper.CountTracks(0) then
+        return nil
+    end
+    return reaper.GetTrack(0, index)
+end
+
+local function safeGetTrackMediaItem(track, index)
+    if not track or index < 0 or index >= reaper.CountTrackMediaItems(track) then
+        return nil
+    end
+    return reaper.GetTrackMediaItem(track, index)
+end
+
+local function safeGetMediaItemInfo_Value(item, param)
+    if not item then return 0 end
+    return reaper.GetMediaItemInfo_Value(item, param)
+end
+
+local function itemContains(parentItem, childItem)
+    if not parentItem or not childItem then return false end
+    
+    local parentStart = safeGetMediaItemInfo_Value(parentItem, "D_POSITION")
+    local parentLength = safeGetMediaItemInfo_Value(parentItem, "D_LENGTH")
+    local parentEnd = parentStart + parentLength
+    
+    local childStart = safeGetMediaItemInfo_Value(childItem, "D_POSITION")
+    local childLength = safeGetMediaItemInfo_Value(childItem, "D_LENGTH")
+    local childEnd = childStart + childLength
+    
+    return parentStart <= childStart and childEnd <= parentEnd
+end
+
+local function getSelectedFolderItems()
+    local folderItems = {}
+    local trackCount = reaper.CountTracks(0)
+    
+    -- Pre-allocate for better memory performance
+    local folderTracks = {}
+    
+    -- First pass: identify folder tracks only
+    for i = 0, math.min(trackCount - 1, MAX_TRACKS) do
+        local track = reaper.GetTrack(0, i)
+        if track and reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH") == 1 then
+            folderTracks[#folderTracks + 1] = track
+        end
+    end
+    
+    -- Second pass: only check items on folder tracks
+    for i = 1, #folderTracks do
+        local track = folderTracks[i]
+        local itemCount = reaper.CountTrackMediaItems(track)
+        for j = 0, math.min(itemCount - 1, MAX_ITEMS_PER_TRACK) do
+            local item = reaper.GetTrackMediaItem(track, j)
+            if item and reaper.CountTakes(item) == 0 and reaper.IsMediaItemSelected(item) then
+                folderItems[#folderItems + 1] = {
+                    track = track,
+                    item = item
+                }
+            end
+        end
+    end
+    
+    return folderItems
+end
+
+local function deselectChildrenForFolder(folderTrack, folderItem)
+    if not folderTrack or not folderItem then return 0 end
+    
+    local deselectedCount = 0
+    local folderTrackNum = reaper.GetMediaTrackInfo_Value(folderTrack, "IP_TRACKNUMBER") - 1
+    local depth = 0
+    local trackIndex = 1
+    
+    -- Cache folder item bounds once
+    local parentStart = reaper.GetMediaItemInfo_Value(folderItem, "D_POSITION")
+    local parentEnd = parentStart + reaper.GetMediaItemInfo_Value(folderItem, "D_LENGTH")
+    
+    -- Batch collect items to deselect first
+    local itemsToDeselect = {}
+    
+    while depth >= 0 and trackIndex < MAX_TRACKS do
+        local track = reaper.GetTrack(0, folderTrackNum + trackIndex)
+        if not track then break end
+        
+        local itemCount = reaper.CountTrackMediaItems(track)
+        for i = 0, math.min(itemCount - 1, MAX_ITEMS_PER_TRACK) do
+            local item = reaper.GetTrackMediaItem(track, i)
+            if item and reaper.IsMediaItemSelected(item) then
+                -- Inline containment check for speed
+                local childStart = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+                local childEnd = childStart + reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+                
+                if parentStart <= childStart and childEnd <= parentEnd then
+                    itemsToDeselect[#itemsToDeselect + 1] = item
+                end
+            end
+        end
+        
+        depth = depth + reaper.GetMediaTrackInfo_Value(track, "I_FOLDERDEPTH")
+        trackIndex = trackIndex + 1
+    end
+    
+    -- Batch deselect all items
+    for i = 1, #itemsToDeselect do
+        reaper.SetMediaItemSelected(itemsToDeselect[i], false)
+    end
+    
+    return #itemsToDeselect
+end
+
+-- MAIN FUNCTION
+local function main()
+    local folderItems = getSelectedFolderItems()
+    
+    if #folderItems == 0 then
+        -- Exit silently if no folder items selected
+        return
+    end
+    
+    -- Set flags to disable main script's child selection BEFORE doing anything
+    reaper.SetProjExtState(0, "FolderItems", "DisableChildSelection", "1")
+    _G.FOLDER_ITEMS_DISABLE_CHILD_SELECTION = true
+    
+    -- Force a small delay to let the flag take effect
+    local function doDeselection()
+        reaper.PreventUIRefresh(1)
+        reaper.Undo_BeginBlock()
+        
+        -- Single aggressive pass instead of multiple attempts
+        for _, folderData in ipairs(folderItems) do
+            deselectChildrenForFolder(folderData.track, folderData.item)
+            -- Ensure folder item stays selected
+            reaper.SetMediaItemSelected(folderData.item, true)
+        end
+        
+        reaper.Undo_EndBlock("Deselect Folder Child Items", -1)
+        reaper.PreventUIRefresh(-1)
+        reaper.UpdateArrange()
+        
+        -- Reduced persistent attempts for speed
+        local keepDeselecting
+        local attempts = 0
+        keepDeselecting = function()
+            attempts = attempts + 1
+            if attempts > 5 then -- Reduced from 10 to 5
+                -- Clear the flags after we're done
+                reaper.SetProjExtState(0, "FolderItems", "DisableChildSelection", "0")
+                _G.FOLDER_ITEMS_DISABLE_CHILD_SELECTION = false
+                return
+            end
+            
+            -- Quick recheck and deselect
+            for _, folderData in ipairs(folderItems) do
+                deselectChildrenForFolder(folderData.track, folderData.item)
+                reaper.SetMediaItemSelected(folderData.item, true)
+            end
+            
+            reaper.defer(keepDeselecting)
+        end
+        
+        reaper.defer(keepDeselecting)
+    end
+    
+    -- Start deselection after a small delay
+    reaper.defer(doDeselection)
+end
+
+-- Run the script
+main()
