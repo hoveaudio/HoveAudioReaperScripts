@@ -8,5 +8,8 @@ Import these manually into Reaper by:
 Check out my youtube where I'll explain these scripts in more detail
 https://www.youtube.com/@SoundsGoodBroHA
 
+My main sound design channel
+https://www.youtube.com/@HoveAudio
+
 I don't know how to code :3
 So that's why I didn't set these up for ReaPack
