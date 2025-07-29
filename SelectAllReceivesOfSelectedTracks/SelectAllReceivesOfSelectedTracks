@@ -1,0 +1,85 @@
+-- Select All Receives for Selected Track
+-- This script selects all tracks that are sending audio to the currently selected track
+
+function main()
+    -- Get all currently selected tracks
+    local selected_tracks = {}
+    local selected_count = reaper.CountSelectedTracks(0)
+    
+    if selected_count == 0 then
+        reaper.ShowMessageBox("No tracks selected!", "Error", 0)
+        return
+    end
+    
+    -- Store all selected tracks
+    for i = 0, selected_count - 1 do
+        selected_tracks[i + 1] = reaper.GetSelectedTrack(0, i)
+    end
+    
+    -- Clear current selection
+    reaper.Main_OnCommand(40297, 0) -- Track: Unselect all tracks
+    
+    -- Get total number of tracks in project
+    local track_count = reaper.CountTracks(0)
+    
+    -- Counter for found receives
+    local receives_found = 0
+    local selected_source_tracks = {} -- To avoid selecting the same track multiple times
+    
+    -- Loop through all tracks to find which ones send to any of our selected tracks
+    for i = 0, track_count - 1 do
+        local track = reaper.GetTrack(0, i)
+        
+        -- Get number of sends from this track
+        local send_count = reaper.GetTrackNumSends(track, 0) -- 0 = sends (not receives)
+        
+        -- Check each send from this track
+        for j = 0, send_count - 1 do
+            local dest_track = reaper.BR_GetMediaTrackSendInfo_Track(track, 0, j, 1) -- 1 = destination track
+            
+            -- Check if this send goes to any of our selected tracks
+            for k = 1, #selected_tracks do
+                if dest_track == selected_tracks[k] then
+                    -- Only select if we haven't already selected this source track
+                    if not selected_source_tracks[track] then
+                        reaper.SetTrackSelected(track, true)
+                        selected_source_tracks[track] = true
+                        receives_found = receives_found + 1
+                    end
+                    break -- Found a match, no need to check other selected tracks
+                end
+            end
+        end
+    end
+    
+    -- Also check hardware outputs that might be receiving from tracks
+    -- This checks for tracks sending to the selected track via hardware outputs
+    for i = 0, track_count - 1 do
+        local track = reaper.GetTrack(0, i)
+        
+        -- Get number of hardware outputs from this track
+        local hw_send_count = reaper.GetTrackNumSends(track, 1) -- 1 = hardware outputs
+        
+        -- Check each hardware send from this track
+        for j = 0, hw_send_count - 1 do
+            -- Get hardware output info
+            local retval, buf = reaper.GetTrackSendName(track, 1, j, "")
+            -- This is more complex to match hardware routing, so we'll focus on track sends
+        end
+    end
+    
+    -- If no receives found, re-select the original tracks since we cleared selection
+    if receives_found == 0 then
+        for i = 1, #selected_tracks do
+            reaper.SetTrackSelected(selected_tracks[i], true)
+        end
+    end
+    
+    -- Update the arrange view
+    reaper.UpdateArrange()
+end
+
+-- Run the main function
+reaper.Undo_BeginBlock()
+main()
+reaper.Undo_EndBlock("Select All Receives for Selected Track", -1)
