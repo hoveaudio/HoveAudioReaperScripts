@@ -1,0 +1,39 @@
+-- Delete Track Named "Tuner"
+-- This script searches for and deletes any track named "Tuner"
+
+function main()
+    -- Start undo block
+    reaper.Undo_BeginBlock()
+    
+    -- Get the number of tracks in the project
+    local track_count = reaper.CountTracks(0)
+    
+    -- Counter for deleted tracks
+    local deleted_count = 0
+    
+    -- Loop through tracks backwards (important when deleting)
+    for i = track_count - 1, 0, -1 do
+        -- Get the track
+        local track = reaper.GetTrack(0, i)
+        
+        if track then
+            -- Get track name
+            local _, track_name = reaper.GetSetMediaTrackInfo_String(track, "P_NAME", "", false)
+            
+            -- Check if track name matches "Tuner"
+            if track_name == "Tuner" then
+                -- Delete the track
+                reaper.DeleteTrack(track)
+                deleted_count = deleted_count + 1
+            end
+        end
+    end
+    
+    -- Silent operation - no confirmation popup
+    
+    -- End undo block
+    reaper.Undo_EndBlock("Delete Track Named 'Tuner'", -1)
+end
+
+-- Run the main function
+main()
