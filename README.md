@@ -6,7 +6,7 @@ Import these manually into Reaper by:
 5. Enjoy
 
 Check out my youtube where I'll explain these scripts in more detail
-https://www.youtube.com/@SoundsGoodBroHA
+https://www.youtube.com/@SoundsGoodBroReaper
 
 My main sound design channel
 https://www.youtube.com/@HoveAudio
