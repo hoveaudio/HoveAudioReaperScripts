@@ -1,0 +1,29 @@
+-- Move edit cursor to start of next measure in MIDI Editor
+
+local hwnd = reaper.MIDIEditor_GetActive()
+if not hwnd then
+  reaper.MB("No active MIDI editor", "Error", 0)
+  return
+end
+
+local take = reaper.MIDIEditor_GetTake(hwnd)
+if not take then
+  reaper.MB("No active MIDI take", "Error", 0)
+  return
+end
+
+-- Get current cursor position in the MIDI editor
+local cursor_pos = reaper.GetCursorPosition()
+
+-- Get time signature and measure info at cursor position
+local retval, measures, cml, fullbeats, cdenom = reaper.TimeMap2_timeToBeats(0, cursor_pos)
+
+-- Get the start position of the next measure
+local next_measure_start = reaper.TimeMap2_beatsToTime(0, 0, measures + 1)
+
+-- Set the cursor position
+reaper.SetEditCurPos(next_measure_start, true, true)
+
+-- Update arrangement and MIDI editor
+reaper.UpdateArrange()
+reaper.UpdateTimeline()
