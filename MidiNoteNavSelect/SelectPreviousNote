@@ -1,0 +1,64 @@
+-- Select previous note by time position (ignoring pitch)
+-- Finds the nearest note that starts before the current selected note
+
+local hwnd = reaper.MIDIEditor_GetActive()
+if not hwnd then
+  reaper.MB("No active MIDI editor", "Error", 0)
+  return
+end
+
+local take = reaper.MIDIEditor_GetTake(hwnd)
+if not take then
+  reaper.MB("No active MIDI take", "Error", 0)
+  return
+end
+
+-- Get the number of notes in the take
+local retval, note_count = reaper.MIDI_CountEvts(take)
+
+-- Find the currently selected note and get its position
+local current_note_pos = nil
+local current_note_idx = nil
+
+for i = 0, note_count - 1 do
+  local retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(take, i)
+  if selected then
+    current_note_pos = startppqpos
+    current_note_idx = i
+    break
+  end
+end
+
+-- If no note is selected, select the last note
+if not current_note_pos then
+  if note_count > 0 then
+    reaper.MIDI_SetNote(take, note_count - 1, true, nil, nil, nil, nil, nil, nil, true)
+  end
+  return
+end
+
+-- Find the previous note (latest note that starts before current note)
+local prev_note_idx = nil
+local prev_note_pos = -math.huge
+
+for i = 0, note_count - 1 do
+  local retval, selected, muted, startppqpos, endppqpos, chan, pitch, vel = reaper.MIDI_GetNote(take, i)
+  if startppqpos < current_note_pos and startppqpos > prev_note_pos then
+    prev_note_pos = startppqpos
+    prev_note_idx = i
+  end
+end
+
+-- If we found a previous note, select it and deselect all others
+if prev_note_idx then
+  for i = 0, note_count - 1 do
+    if i == prev_note_idx then
+      reaper.MIDI_SetNote(take, i, true, nil, nil, nil, nil, nil, nil, true)
+    else
+      reaper.MIDI_SetNote(take, i, false, nil, nil, nil, nil, nil, nil, true)
+    end
+  end
+  
+  -- Update the MIDI editor
+  reaper.UpdateArrange()
+end
