@@ -1,0 +1,24 @@
+-- Mute Selected Tracks (No Toggle)
+-- If track is not muted, mute it. If already muted, do nothing.
+
+local track_count = reaper.CountSelectedTracks(0)
+
+if track_count == 0 then
+  reaper.MB("No tracks selected.", "Mute Selected Tracks", 0)
+  return
+end
+
+reaper.Undo_BeginBlock()
+
+for i = 0, track_count - 1 do
+  local track = reaper.GetSelectedTrack(0, i)
+  local is_muted = reaper.GetMediaTrackInfo_Value(track, "B_MUTE")
+  
+  -- Only mute if not already muted (is_muted == 0 means not muted)
+  if is_muted == 0 then
+    reaper.SetMediaTrackInfo_Value(track, "B_MUTE", 1)
+  end
+end
+
+reaper.Undo_EndBlock("Mute Selected Tracks", -1)
+reaper.UpdateArrange()
