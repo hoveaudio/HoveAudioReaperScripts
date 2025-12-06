@@ -1,0 +1,2 @@
+Such a niche issue, doubt this will apply to many people.
+I use a macbook trackpad in tandem with an external mouse. I started using Mac Mouse Fix to reverse my scroll direction on my mouse without affecting the trackpad. Even with Reaper set up properly to conform to my scrolling preferences, using the scroll wheel to control the "View: Go to track (MIDI CC/OSC only)" action was still reversed. This is an adjusted version of that action.
