@@ -1,0 +1,47 @@
+-- Reverse Mousewheel for "Go to track" action
+-- This script reverses the mousewheel input and executes the go to track behavior
+
+-- Get the mousewheel value from MIDI CC/OSC input
+local _, _, _, _, _, _, val = reaper.get_action_context()
+
+-- Get track info
+local sel_track = reaper.GetSelectedTrack(0, 0)
+local track_count = reaper.CountTracks(0)
+
+if track_count == 0 then return end
+
+-- Get current track index or start at 0
+local current_idx = 0
+if sel_track then
+  current_idx = reaper.GetMediaTrackInfo_Value(sel_track, "IP_TRACKNUMBER") - 1
+end
+
+-- Mousewheel sends floating point values:
+-- Negative values = one direction
+-- Positive values = other direction
+-- We reverse by flipping the sign
+local new_idx
+
+if val > 0 then
+  -- Positive value -> go UP (reversed from DOWN)
+  new_idx = current_idx - 1
+elseif val < 0 then
+  -- Negative value -> go DOWN (reversed from UP)
+  new_idx = current_idx + 1
+else
+  return -- Zero value, no movement
+end
+
+-- Clamp to valid range
+if new_idx < 0 then
+  new_idx = 0
+elseif new_idx >= track_count then
+  new_idx = track_count - 1
+end
+
+-- Select and scroll to the new track
+local new_track = reaper.GetTrack(0, new_idx)
+reaper.SetOnlyTrackSelected(new_track)
+reaper.SetMixerScroll(new_track)
+reaper.TrackList_AdjustWindows(false)
+reaper.UpdateArrange()
