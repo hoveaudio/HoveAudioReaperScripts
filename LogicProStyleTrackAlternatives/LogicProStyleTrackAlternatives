@@ -24,7 +24,7 @@ function init()
     gfx.setfont(3, "Arial", 12)
 end
 
--- Serialize item data
+-- Serialize item data including MIDI
 function SerializeItem(item)
     local data = {
         position = reaper.GetMediaItemInfo_Value(item, "D_POSITION"),
@@ -55,8 +55,17 @@ function SerializeItem(item)
             local source = reaper.GetMediaItemTake_Source(take)
             if source then
                 local sourceFile = reaper.GetMediaSourceFileName(source, "")
+                local sourceType = reaper.GetMediaSourceType(source, "")
                 takeData.source_file = sourceFile
-                takeData.source_type = reaper.GetMediaSourceType(source, "")
+                takeData.source_type = sourceType
+                
+                -- Check if this is a MIDI take
+                if reaper.TakeIsMIDI(take) then
+                    takeData.is_midi = true
+                    -- Store MIDI data as chunk
+                    local _, chunk = reaper.GetItemStateChunk(item, "", false)
+                    takeData.midi_chunk = chunk
+                end
             end
             
             table.insert(data.takes, takeData)
@@ -103,6 +112,16 @@ function SaveItemsToAlternative(track, letter)
             chunk = chunk .. "PAN " .. take_data.pan .. "\n"
             chunk = chunk .. "PITCH " .. take_data.pitch .. "\n"
             chunk = chunk .. "RATE " .. take_data.playrate .. "\n"
+            
+            -- Store MIDI data if present
+            if take_data.is_midi and take_data.midi_chunk then
+                chunk = chunk .. "ISMIDI 1\n"
+                -- Encode MIDI chunk with special markers
+                chunk = chunk .. "MIDICHUNK_START\n"
+                chunk = chunk .. take_data.midi_chunk .. "\n"
+                chunk = chunk .. "MIDICHUNK_END\n"
+            end
+            
             chunk = chunk .. "TAKE_END\n"
         end
         
@@ -153,15 +172,19 @@ function LoadItemsFromAlternative(track, letter)
                 i = i + 1
             end
             
-            -- Create item
-            local newItem = reaper.AddMediaItemToTrack(track)
-            reaper.SetMediaItemInfo_Value(newItem, "D_POSITION", item_data.POS or 0)
-            reaper.SetMediaItemInfo_Value(newItem, "D_LENGTH", item_data.LEN or 1)
-            reaper.SetMediaItemInfo_Value(newItem, "B_MUTE", item_data.MUTE or 0)
-            reaper.SetMediaItemInfo_Value(newItem, "D_VOL", item_data.VOL or 1)
-            reaper.SetMediaItemInfo_Value(newItem, "D_FADEINLEN", item_data.FADEIN or 0)
-            reaper.SetMediaItemInfo_Value(newItem, "D_FADEOUTLEN", item_data.FADEOUT or 0)
-            reaper.SetMediaItemInfo_Value(newItem, "D_SNAPOFFSET", item_data.SNAPOFF or 0)
+            local newItem = nil
+            local midi_item_chunk = nil
+            
+            -- Check if this is a MIDI item by looking ahead
+            local temp_i = i
+            local has_midi = false
+            while temp_i <= #lines and not lines[temp_i]:match("^ITEM_END") do
+                if lines[temp_i]:match("^ISMIDI") then
+                    has_midi = true
+                    break
+                end
+                temp_i = temp_i + 1
+            end
             
             -- Parse takes
             while i <= #lines and lines[i]:match("^TAKE_") do
@@ -169,15 +192,45 @@ function LoadItemsFromAlternative(track, letter)
                 local take_data = {}
                 
                 while i <= #lines and not lines[i]:match("^TAKE_END") do
-                    local key, value = lines[i]:match("(%S+)%s+(.+)")
-                    if key and value then
-                        take_data[key] = value
+                    if lines[i]:match("^MIDICHUNK_START") then
+                        i = i + 1
+                        midi_item_chunk = ""
+                        while i <= #lines and not lines[i]:match("^MIDICHUNK_END") do
+                            midi_item_chunk = midi_item_chunk .. lines[i] .. "\n"
+                            i = i + 1
+                        end
+                    else
+                        local key, value = lines[i]:match("(%S+)%s+(.+)")
+                        if key and value then
+                            take_data[key] = value
+                        end
                     end
                     i = i + 1
                 end
                 
-                -- Create take
-                if take_data.FILE and take_data.FILE ~= "" then
+                -- If we have MIDI chunk, restore from chunk
+                if midi_item_chunk and midi_item_chunk ~= "" then
+                    -- Create item from chunk
+                    newItem = reaper.AddMediaItemToTrack(track)
+                    reaper.SetItemStateChunk(newItem, midi_item_chunk, false)
+                    
+                    -- Update position and length from our stored data
+                    reaper.SetMediaItemInfo_Value(newItem, "D_POSITION", item_data.POS or 0)
+                    reaper.SetMediaItemInfo_Value(newItem, "D_LENGTH", item_data.LEN or 1)
+                    
+                -- Otherwise create audio item
+                elseif take_data.FILE and take_data.FILE ~= "" then
+                    if not newItem then
+                        newItem = reaper.AddMediaItemToTrack(track)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_POSITION", item_data.POS or 0)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_LENGTH", item_data.LEN or 1)
+                        reaper.SetMediaItemInfo_Value(newItem, "B_MUTE", item_data.MUTE or 0)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_VOL", item_data.VOL or 1)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_FADEINLEN", item_data.FADEIN or 0)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_FADEOUTLEN", item_data.FADEOUT or 0)
+                        reaper.SetMediaItemInfo_Value(newItem, "D_SNAPOFFSET", item_data.SNAPOFF or 0)
+                    end
+                    
                     local pcm_source = reaper.PCM_Source_CreateFromFile(take_data.FILE)
                     if pcm_source then
                         local take = reaper.AddTakeToMediaItem(newItem)
@@ -195,7 +248,9 @@ function LoadItemsFromAlternative(track, letter)
                 i = i + 1
             end
             
-            reaper.UpdateItemInProject(newItem)
+            if newItem then
+                reaper.UpdateItemInProject(newItem)
+            end
         end
         i = i + 1
     end
