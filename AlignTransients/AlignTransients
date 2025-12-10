@@ -1,0 +1,151 @@
+-- Align Selected Items by Track Order
+-- Groups items into stacks: 1st item on each track forms stack 1, 2nd items form stack 2, etc.
+-- Top track is master for each stack, others align their transients to it
+
+function find_first_transient(item)
+    -- Check if item is valid
+    if not item or not reaper.ValidatePtr2(0, item, "MediaItem*") then
+        return 0
+    end
+    
+    local take = reaper.GetActiveTake(item)
+    if not take then return 0 end
+    
+    -- Store current edit cursor position
+    local original_cursor = reaper.GetCursorPosition()
+    
+    -- Get item position and length
+    local item_pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+    local item_length = reaper.GetMediaItemInfo_Value(item, "D_LENGTH")
+    
+    -- Store current item selections
+    local original_selections = {}
+    local num_selected = reaper.CountSelectedMediaItems(0)
+    for i = 0, num_selected - 1 do
+        local sel_item = reaper.GetSelectedMediaItem(0, i)
+        table.insert(original_selections, sel_item)
+    end
+    
+    -- Clear all selections and select only this item
+    reaper.SelectAllMediaItems(0, false)
+    reaper.SetMediaItemSelected(item, true)
+    
+    -- Move cursor to item start
+    reaper.SetEditCurPos(item_pos, false, false)
+    
+    -- Use REAPER's "Go to next transient in items" command
+    reaper.Main_OnCommand(40375, 0)
+    
+    -- Get the new cursor position (should be at the first transient)
+    local transient_pos = reaper.GetCursorPosition()
+    
+    -- Calculate offset from item start to transient
+    local transient_offset = transient_pos - item_pos
+    
+    -- If the cursor didn't move much, assume the transient is at the start
+    if transient_offset < 0.001 then
+        transient_offset = 0.001
+    elseif transient_offset >= item_length then
+        transient_offset = 0.001
+    end
+    
+    -- Restore original selections
+    reaper.SelectAllMediaItems(0, false)
+    for _, sel_item in ipairs(original_selections) do
+        reaper.SetMediaItemSelected(sel_item, true)
+    end
+    
+    -- Restore original cursor position
+    reaper.SetEditCurPos(original_cursor, false, false)
+    
+    return transient_offset
+end
+
+function Main()
+    local num_items = reaper.CountSelectedMediaItems(0)
+    
+    if num_items == 0 then
+        reaper.ShowMessageBox("No items selected!", "Error", 0)
+        return
+    end
+    
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    
+    -- Group items by track, maintaining order
+    local tracks_data = {}
+    local track_order = {}
+    
+    for i = 0, num_items - 1 do
+        local item = reaper.GetSelectedMediaItem(0, i)
+        local track = reaper.GetMediaItem_Track(item)
+        local track_num = reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")
+        
+        if not tracks_data[track_num] then
+            tracks_data[track_num] = {}
+            table.insert(track_order, track_num)
+        end
+        
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        table.insert(tracks_data[track_num], {
+            item = item,
+            position = pos
+        })
+    end
+    
+    -- Sort tracks by number (top to bottom)
+    table.sort(track_order)
+    
+    -- Sort items within each track by position (left to right)
+    for _, track_num in ipairs(track_order) do
+        table.sort(tracks_data[track_num], function(a, b)
+            return a.position < b.position
+        end)
+    end
+    
+    -- Find maximum number of items on any track (number of stacks)
+    local max_items = 0
+    for _, track_num in ipairs(track_order) do
+        if #tracks_data[track_num] > max_items then
+            max_items = #tracks_data[track_num]
+        end
+    end
+    
+    -- Process each stack
+    for stack_idx = 1, max_items do
+        -- Get master item (from topmost track)
+        local master_track_num = track_order[1]
+        local master_data = tracks_data[master_track_num][stack_idx]
+        
+        if not master_data then
+            goto continue
+        end
+        
+        local master_item = master_data.item
+        local master_transient_offset = find_first_transient(master_item)
+        local master_pos = reaper.GetMediaItemInfo_Value(master_item, "D_POSITION")
+        local master_transient_abs = master_pos + master_transient_offset
+        
+        -- Align all other tracks' items in this stack
+        for i = 2, #track_order do
+            local track_num = track_order[i]
+            local item_data = tracks_data[track_num][stack_idx]
+            
+            if item_data then
+                local item = item_data.item
+                local transient_offset = find_first_transient(item)
+                local new_pos = master_transient_abs - transient_offset
+                
+                reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+            end
+        end
+        
+        ::continue::
+    end
+    
+    reaper.PreventUIRefresh(-1)
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock("Align items by track order", -1)
+end
+
+Main()
