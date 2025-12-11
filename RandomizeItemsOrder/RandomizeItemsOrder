@@ -1,0 +1,74 @@
+-- Randomize positions of selected items within each track
+-- Items stay on their own track but swap positions with other items on the same track
+
+function Main()
+    local num_items = reaper.CountSelectedMediaItems(0)
+    
+    if num_items == 0 then
+        reaper.ShowMessageBox("No items selected!", "Error", 0)
+        return
+    end
+    
+    reaper.Undo_BeginBlock()
+    reaper.PreventUIRefresh(1)
+    
+    -- Group items by track
+    local tracks = {}
+    
+    for i = 0, num_items - 1 do
+        local item = reaper.GetSelectedMediaItem(0, i)
+        local track = reaper.GetMediaItem_Track(item)
+        local track_ptr = reaper.GetTrackGUID(track)
+        
+        if not tracks[track_ptr] then
+            tracks[track_ptr] = {
+                track = track,
+                items = {}
+            }
+        end
+        
+        local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+        table.insert(tracks[track_ptr].items, {
+            item = item,
+            position = pos
+        })
+    end
+    
+    -- For each track, randomize the positions
+    local total_swapped = 0
+    
+    for track_ptr, track_data in pairs(tracks) do
+        local items = track_data.items
+        
+        -- Only randomize if there are 2 or more items on this track
+        if #items >= 2 then
+            -- Collect all positions
+            local positions = {}
+            for _, item_data in ipairs(items) do
+                table.insert(positions, item_data.position)
+            end
+            
+            -- Shuffle positions using Fisher-Yates algorithm
+            for i = #positions, 2, -1 do
+                local j = math.random(1, i)
+                positions[i], positions[j] = positions[j], positions[i]
+            end
+            
+            -- Assign shuffled positions back to items
+            for i, item_data in ipairs(items) do
+                reaper.SetMediaItemInfo_Value(item_data.item, "D_POSITION", positions[i])
+            end
+            
+            total_swapped = total_swapped + #items
+        end
+    end
+    
+    reaper.PreventUIRefresh(-1)
+    reaper.UpdateArrange()
+    reaper.Undo_EndBlock("Randomize item positions within tracks", -1)
+end
+
+-- Initialize random seed
+math.randomseed(os.time())
+
+Main()
