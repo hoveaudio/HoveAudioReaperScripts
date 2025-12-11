@@ -1,4 +1,4 @@
-The top most track/items used for the selection is what drives the function of this track.
+The top most track/items used for the selection is what drives the function of this script.
 
 Use it to align mulitple different elements and make sfx in a batch process. 
 
