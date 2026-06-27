@@ -1,0 +1,11 @@
+local editor = reaper.MIDIEditor_GetActive()
+if editor then
+  local take = reaper.MIDIEditor_GetTake(editor)
+  if take then
+    local item = reaper.GetMediaItemTake_Item(take)
+    if item then
+      local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+      reaper.SetEditCurPos(pos, true, false) -- moves edit cursor, moves view, doesn't seek playback
+    end
+  end
+end
