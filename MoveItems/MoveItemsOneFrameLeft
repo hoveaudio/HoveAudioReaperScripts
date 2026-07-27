@@ -1,0 +1,30 @@
+-- Move selected item(s) one frame left
+-- Uses the project's video frame rate to determine frame length
+
+local proj = 0
+local frame_rate = reaper.TimeMap_curFrameRate(proj)
+
+if frame_rate <= 0 then
+  reaper.ShowMessageBox("Could not determine project frame rate.", "Move Items - Error", 0)
+  return
+end
+
+local frame_len = 1 / frame_rate
+
+local num_items = reaper.CountSelectedMediaItems(proj)
+if num_items == 0 then return end
+
+reaper.Undo_BeginBlock()
+reaper.PreventUIRefresh(1)
+
+for i = 0, num_items - 1 do
+  local item = reaper.GetSelectedMediaItem(proj, i)
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+  local new_pos = pos - frame_len
+  if new_pos < 0 then new_pos = 0 end
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+end
+
+reaper.PreventUIRefresh(-1)
+reaper.UpdateArrange()
+reaper.Undo_EndBlock("Move selected item(s) one frame left", -1)
