@@ -1,0 +1,30 @@
+-- Move selected item(s) one grid division left
+-- Uses the current project grid setting (Arrange view grid)
+
+local proj = 0
+
+local num_items = reaper.CountSelectedMediaItems(proj)
+if num_items == 0 then return end
+
+-- division is a fraction of a whole note (1 = whole note, 0.25 = quarter note, etc.)
+local _, division = reaper.GetSetProjectGrid(proj, false)
+local grid_len_qn = division * 4
+
+reaper.Undo_BeginBlock()
+reaper.PreventUIRefresh(1)
+
+for i = 0, num_items - 1 do
+  local item = reaper.GetSelectedMediaItem(proj, i)
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+
+  local qn = reaper.TimeMap2_timeToQN(proj, pos)
+  local new_qn = qn - grid_len_qn
+  local new_pos = reaper.TimeMap2_QNToTime(proj, new_qn)
+  if new_pos < 0 then new_pos = 0 end
+
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+end
+
+reaper.PreventUIRefresh(-1)
+reaper.UpdateArrange()
+reaper.Undo_EndBlock("Move selected item(s) one grid division left", -1)
