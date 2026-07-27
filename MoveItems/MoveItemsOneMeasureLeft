@@ -1,0 +1,29 @@
+-- Move selected item(s) one measure left
+-- Measure length is based on the time signature at each item's current position
+
+local proj = 0
+
+local num_items = reaper.CountSelectedMediaItems(proj)
+if num_items == 0 then return end
+
+reaper.Undo_BeginBlock()
+reaper.PreventUIRefresh(1)
+
+for i = 0, num_items - 1 do
+  local item = reaper.GetSelectedMediaItem(proj, i)
+  local pos = reaper.GetMediaItemInfo_Value(item, "D_POSITION")
+
+  local qn = reaper.TimeMap2_timeToQN(proj, pos)
+  local timesig_num, timesig_denom = reaper.TimeMap_GetTimeSigAtTime(proj, pos)
+  local measure_len_qn = timesig_num * (4 / timesig_denom)
+
+  local new_qn = qn - measure_len_qn
+  local new_pos = reaper.TimeMap2_QNToTime(proj, new_qn)
+  if new_pos < 0 then new_pos = 0 end
+
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", new_pos)
+end
+
+reaper.PreventUIRefresh(-1)
+reaper.UpdateArrange()
+reaper.Undo_EndBlock("Move selected item(s) one measure left", -1)
